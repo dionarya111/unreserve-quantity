@@ -1,6 +1,5 @@
 quants = env['stock.quant'].search([])
 move_line_ids = []
-
 warning = ''
 for quant in quants:
     move_lines = env["stock.move.line"].search([
@@ -19,49 +18,40 @@ for quant in quants:
         # If a quant is in a location that should bypass the reservation, its `reserved_quantity` field
         # should be 0.
         if quant.reserved_quantity != 0:
-            warning += "Problematic quant found: %s (quantity: %s, reserved_quantity: %s)\n" % (quant.id, quant.quantity, quant.reserved_quantity)
-            warning += "its `reserved_quantity` field is not 0 while its location should bypass the reservation\n"
-            if move_lines:
-                warning += "These move lines are reserved on it: %s (sum of the reservation: %s)\n" % (move_line_str, reserved_on_move_lines)
-            else:
-                warning += "no move lines are reserved on it, you can safely reset its `reserved_quantity` to 0\n"
-            warning += '******************\n'
+            quant.write({'reserved_quantity': 0})
     else:
         # If a quant is in a reservable location, its `reserved_quantity` should be exactly the sum
         # of the `product_qty` of all the partially_available / assigned move lines with the same
         # characteristics.
         if quant.reserved_quantity == 0:
             if move_lines:
-                warning += "Problematic quant found: %s (quantity: %s, reserved_quantity: %s)\n" % (quant.id, quant.quantity, quant.reserved_quantity)
-                warning += "its `reserved_quantity` field is 0 while these move lines are reserved on it: %s (sum of the reservation: %s)\n" % (move_line_str, reserved_on_move_lines)
-                warning += '******************\n'
+                move_lines.with_context(bypass_reservation_update=True).write({'product_uom_qty': 0})
         elif quant.reserved_quantity < 0:
-            warning += "Problematic quant found: %s (quantity: %s, reserved_quantity: %s)\n" % (quant.id, quant.quantity, quant.reserved_quantity)
-            warning += "its `reserved_quantity` field is negative while it should not happen\n"
+            quant.write({'reserved_quantity': 0})
             if move_lines:
-                warning += "These move lines are reserved on it: %s (sum of the reservation: %s)\n" % (move_line_str, reserved_on_move_lines)
-            warning += '******************\n'
+                move_lines.with_context(bypass_reservation_update=True).write({'product_uom_qty': 0})
         else:
             if reserved_on_move_lines != quant.reserved_quantity:
-                warning += "Problematic quant found: %s (quantity: %s, reserved_quantity: %s)\n" % (quant.id, quant.quantity, quant.reserved_quantity)
-                warning += "its `reserved_quantity` does not reflect the move lines reservation\n"
-                warning += "These move lines are reserved on it: %s (sum of the reservation: %s)\n" % (move_line_str, reserved_on_move_lines)
-                warning += '******************\n'
+                move_lines.with_context(bypass_reservation_update=True).write({'product_uom_qty': 0})
+                quant.write({'reserved_quantity': 0})
             else:
               if any(move_line.product_qty < 0 for move_line in move_lines):
-                warning += "Problematic quant found: %s (quantity: %s, reserved_quantity: %s)\n" % (quant.id, quant.quantity, quant.reserved_quantity)
-                warning += "its `reserved_quantity` correctly reflects the move lines reservation but some are negatives\n"
-                warning += "These move lines are reserved on it: %s (sum of the reservation: %s)\n" % (move_line_str, reserved_on_move_lines)
-                warning += '******************\n'
+                move_lines.with_context(bypass_reservation_update=True).write({'product_uom_qty': 0})
+                quant.write({'reserved_quantity': 0})
 
-move_lines = env['stock.move.line'].search([('product_id.type', '=', 'product'), ('product_qty', '!=', 0), ('id', 'not in', move_line_ids)])
+move_lines = env['stock.move.line'].search([
+    ('product_id.type', '=', 'product'),
+    ('product_qty', '!=', 0),
+    ('id', 'not in', move_line_ids),
+])
+
+move_lines_to_unreserve = []
 
 for move_line in move_lines:
     if not move_line.location_id.should_bypass_reservation():
-       warning += "Problematic move line found: %s (reserved_quantity: %s)\n" % (move_line.id, move_line.product_qty)
-       warning += "There is no exiting quants despite its `reserved_quantity`\n"
-       warning += '******************\n'
+       move_lines_to_unreserve.append(move_line.id)
 
-if warning == '':
-    warning = 'nothing seems wrong'
-raise Warning(warning)
+if len(move_lines_to_unreserve) > 1:
+    env.cr.execute(""" UPDATE stock_move_line SET product_uom_qty = 0, product_qty = 0 WHERE id in %s ;""" % (tuple(move_lines_to_unreserve), ))
+elif len(move_lines_to_unreserve) == 1:
+    env.cr.execute(""" UPDATE stock_move_line SET product_uom_qty = 0, product_qty = 0 WHERE id = %s ;""" % (move_lines_to_unreserve[0]))

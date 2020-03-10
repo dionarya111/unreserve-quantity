@@ -1,0 +1,27 @@
+1.debug mode
+
+2.technical/server actions
+
+3.create
+
+4.action name: e.g. fix unreserved qty
+
+5.model: ir.actions.server
+
+6.action to do: "execute python code"
+
+7.copy/paste the fix underneath the pre-existing code
+
+8."save" 
+
+9."create contextual action"
+
+10.refresh page
+
+11.action/fix "fix unreserved qty"
+
+12.wait for it to load 
+
+13."remove contextual action"
+
+14.action/delete
